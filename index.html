@@ -41,7 +41,7 @@ dialog .row{margin-top:20px;justify-content:flex-end}
 </head>
 <body>
 <header>
-  <div><h1>Visionneuse</h1><div style="font-size:12px;color:var(--mute)">Version 2026-09-29 18:50 · PWA</div></div>
+  <div><h1>Visionneuse</h1><div style="font-size:12px;color:var(--mute)">Version 2026-09-29 19:30 · PWA</div></div>
   <span id="conn" class="pill"><span class="dot"></span><span id="connTxt">Démarrage…</span></span>
 </header>
 <main>
@@ -114,7 +114,7 @@ dialog .row{margin-top:20px;justify-content:flex-end}
 
   async function poll(){
     if(document.hidden)return;
-    if(!cfg.token){status('Jeton requis');return;}
+    if(!cfg.token){status('Liens seulement');return;}
     const q='query{items(ids:['+CUR+','+REG+']){id column_values(ids:["'+COL+'"]){text}}}';
     try{
       const r=await fetch('https://api.monday.com/v2',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','Authorization':cfg.token,'API-Version':'2024-10'},body:JSON.stringify({query:q})});
@@ -132,7 +132,12 @@ dialog .row{margin-top:20px;justify-content:flex-end}
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
   if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
   if(!window.navigator.standalone)log('Astuce : Partager → Sur l\'écran d\'accueil');
-  if(!cfg.token)log('Ouvrez Réglages et collez votre jeton API monday.com');
+  // Commande dans le lien (sans jeton) : …/visionneuse/#s=<raccourci>&i=<entrée>&l=<titre>
+  function fromHash(){const h=new URLSearchParams((location.hash||'').slice(1));const s=h.get('s');if(!s)return false;
+    log('Lien reçu : '+s);show({shortcut:s,input:h.get('i')||'',label:h.get('l')||s});try{history.replaceState(null,'',location.pathname)}catch(e){}return true}
+  addEventListener('hashchange',fromHash);
+  const viaLink=fromHash();
+  if(!cfg.token&&!viaLink)log('Ouvrez Réglages et collez votre jeton API monday.com (ou utilisez un lien)');
   restart();
 })();
 </script>
