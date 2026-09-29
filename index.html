@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Visionneuse">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>Visionneuse IA</title>
+<style>
+:root{--bg:#f4f5f6;--card:#fff;--ink:#1d2125;--mute:#6b7278;--line:#dde0e3;--go:#1f8a4c;--goSoft:#e5f4ea;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#15181b;--card:#1f2327;--ink:#eceef0;--mute:#9aa1a7;--line:#33383d;--goSoft:#17352a}}
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,"SF Pro Text","Helvetica Neue",Arial,sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px}
+h1{font-size:20px;margin:0;font-weight:600}
+.pill{height:28px;border-radius:14px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--mute)}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--mute)}
+.pill.on{color:var(--go);border-color:var(--go)}.pill.on .dot{background:var(--go)}
+button.pill{font-size:14px;cursor:pointer}
+main{flex:1;display:flex;flex-direction:column;padding:0 16px 16px;gap:12px;min-height:0}
+.stage{flex:1;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;overflow:auto}
+.stage.active{border-color:var(--go);background:var(--goSoft)}
+.waiting{color:var(--mute)}
+.label{font-size:20px;font-weight:600;margin:0 0 6px}
+.meta{font-size:14px;color:var(--mute);margin:0 0 20px;word-break:break-word}
+.text{text-align:left;white-space:pre-wrap;width:100%}
+.open{display:inline-flex;align-items:center;justify-content:center;min-width:220px;height:56px;border-radius:28px;background:var(--go);color:#fff;font-size:20px;font-weight:600;text-decoration:none}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.log{font-size:12px;color:var(--mute);max-height:84px;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px}
+.log div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--ink);width:min(92vw,420px);padding:20px}
+dialog label{display:block;font-size:14px;color:var(--mute);margin:12px 0 4px}
+dialog input{width:100%;height:40px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:16px;background:var(--bg);color:var(--ink)}
+dialog .row{margin-top:20px;justify-content:flex-end}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Visionneuse</h1><div style="font-size:12px;color:var(--mute)">Version 2026-09-29 18:50 · PWA</div></div>
+  <span id="conn" class="pill"><span class="dot"></span><span id="connTxt">Démarrage…</span></span>
+</header>
+<main>
+  <section id="stage" class="stage"><p class="waiting">En attente d'une demande de Claude</p></section>
+  <div class="row">
+    <button id="autoBtn" class="pill" type="button"></button>
+    <button id="clearBtn" class="pill" type="button">Effacer</button>
+    <button id="cfgBtn" class="pill" type="button">Réglages</button>
+  </div>
+  <div id="log" class="log" aria-live="polite"></div>
+</main>
+
+<dialog id="cfg">
+  <h1>Réglages</h1>
+  <label for="fTok">Jeton API monday.com (personnel)</label><input id="fTok" type="password" autocapitalize="off" autocorrect="off">
+  <label for="fInt">Vérifier toutes les (secondes)</label><input id="fInt" type="number" min="2" max="60">
+  <div class="row">
+    <button class="pill" type="button" id="cfgTest">Tester le raccourci</button>
+    <button class="pill on" type="button" id="cfgSave">Enregistrer</button>
+  </div>
+</dialog>
+
+<script>
+(function(){
+  const BOARD=18433298589, CUR=13166035670, REG=13166022651, COL='long_text_mm7nk4t5';
+  const $=id=>document.getElementById(id);
+  const store={get(k,d){try{const v=localStorage.getItem(k);return v===null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+  const cfg={token:store.get('token',''),interval:Math.max(2,Number(store.get('interval','3'))),shortcut:'Quick Look'};
+  let auto=store.get('auto','1')!=='0', lastSeq=Number(store.get('lastSeq','0')), primed=false, timer=null, failures=0;
+  let registry={}, lastRaw='', lastRegRaw='';
+
+  function log(m){const d=document.createElement('div');d.textContent=new Date().toLocaleTimeString('fr-CA')+'  '+m;$('log').prepend(d);while($('log').children.length>40)$('log').lastChild.remove();}
+  function status(t,on){$('connTxt').textContent=t;$('conn').classList.toggle('on',!!on);}
+  function paintAuto(){$('autoBtn').textContent=auto?'Lancement auto : oui':'Lancement auto : non';$('autoBtn').classList.toggle('on',auto);}
+  $('autoBtn').onclick=()=>{auto=!auto;store.set('auto',auto?'1':'0');paintAuto();};
+  $('clearBtn').onclick=()=>{$('stage').className='stage';$('stage').innerHTML='<p class="waiting">En attente d\'une demande de Claude</p>';};
+  paintAuto();
+  $('cfgBtn').onclick=()=>{$('fTok').value=cfg.token;$('fInt').value=cfg.interval;$('cfg').showModal();};
+  $('cfgSave').onclick=()=>{cfg.token=$('fTok').value.trim();cfg.interval=Math.max(2,Number($('fInt').value)||3);store.set('token',cfg.token);store.set('interval',String(cfg.interval));$('cfg').close();primed=false;log('Réglages enregistrés');restart();};
+  $('cfgTest').onclick=()=>{location.href=shortcutUrl({shortcut:'Quick Look OneDrive Path',input:'Classeur2.xlsx'});};
+
+  function shortcutUrl(c){
+    const payload=typeof c.input==='string'?c.input:JSON.stringify(c.input||{});
+    return 'shortcuts://run-shortcut?name='+encodeURIComponent(c.shortcut||cfg.shortcut)+'&input=text&text='+encodeURIComponent(payload);
+  }
+  function resolve(c){
+    if(c.action!=='show')return c;
+    const it=registry[String(c.id)];
+    if(!it)return {action:'text',label:'No '+c.id,text:'Cet élément n\'est pas dans le registre.'};
+    return {label:it.label||it.name,shortcut:c.shortcut||it.shortcut,input:(it.input!==undefined?it.input:{name:it.name,folder:it.folder})};
+  }
+  function show(c){
+    c=resolve(c);
+    const st=$('stage');st.className='stage active';st.innerHTML='';
+    const h=document.createElement('p');h.className='label';h.textContent=c.label||'Demande';st.appendChild(h);
+    if(c.action==='text'){const t=document.createElement('div');t.className='text';t.textContent=c.text||'';st.appendChild(t);return;}
+    const url=shortcutUrl(c);
+    const m=document.createElement('p');m.className='meta';m.textContent='Raccourci « '+(c.shortcut||cfg.shortcut)+' »';st.appendChild(m);
+    const a=document.createElement('a');a.className='open';a.href=url;a.textContent='Ouvrir';a.onclick=()=>log('Ouvrir touché');st.appendChild(a);
+    if(auto){log('Lancement auto');location.href=url;}
+  }
+  function handle(c){
+    const seq=Number(c.seq||0);
+    if(!primed){primed=true;if(seq<=lastSeq||Date.now()-Number(c.sentAt||0)>120000){lastSeq=Math.max(lastSeq,seq);store.set('lastSeq',String(lastSeq));return;}}
+    if(!seq||seq<=lastSeq)return;
+    lastSeq=seq;store.set('lastSeq',String(seq));
+    log('Reçu : '+(c.label||c.action||'demande'));
+    show(c);
+  }
+
+  async function poll(){
+    if(document.hidden)return;
+    if(!cfg.token){status('Jeton requis');return;}
+    const q='query{items(ids:['+CUR+','+REG+']){id column_values(ids:["'+COL+'"]){text}}}';
+    try{
+      const r=await fetch('https://api.monday.com/v2',{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','Authorization':cfg.token,'API-Version':'2024-10'},body:JSON.stringify({query:q})});
+      const j=await r.json();
+      if(!r.ok||j.errors||j.error_message){failures++;status('Erreur',false);if(failures===1)log('monday : '+(j.error_message||(j.errors&&j.errors[0]&&j.errors[0].message)||r.status));return;}
+      failures=0;status('À l\'écoute',true);
+      for(const it of j.data.items){
+        const raw=(it.column_values[0]&&it.column_values[0].text)||'';
+        if(String(it.id)===String(REG)){ if(raw&&raw!==lastRegRaw){lastRegRaw=raw;try{registry=JSON.parse(raw).items||{};log('Registre : '+Object.keys(registry).length+' élément(s)');}catch(e){log('Registre illisible');}} }
+        else if(raw!==lastRaw){lastRaw=raw; if(raw){try{handle(JSON.parse(raw));}catch(e){log('Commande illisible');}} else primed=true;}
+      }
+    }catch(e){failures++;status('Hors réseau',false);if(failures===1)log('Pas de réseau ou accès refusé');}
+  }
+  function restart(){clearInterval(timer);timer=setInterval(poll,cfg.interval*1000);poll();}
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
+  if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+  if(!window.navigator.standalone)log('Astuce : Partager → Sur l\'écran d\'accueil');
+  if(!cfg.token)log('Ouvrez Réglages et collez votre jeton API monday.com');
+  restart();
+})();
+</script>
+</body>
+</html>
